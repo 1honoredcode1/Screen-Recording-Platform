@@ -1,0 +1,6 @@
+{
+  "databaseURL": "https://HonoredCodePrince-s-workspace-lq126q.eu-central-1.xata.sh/db/hcp_memspin",
+  "codegen": {
+    "output": "src/xata.ts"
+  }
+}
