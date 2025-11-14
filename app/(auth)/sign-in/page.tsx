@@ -46,7 +46,7 @@ const page = () => {
                 className="rounded-full"
               />
               <div>
-                <h2>Klevis</h2>
+                <h2>HonoreCodePrince</h2>
                 <p>Web Developer, HCP</p>
               </div>
             </article>

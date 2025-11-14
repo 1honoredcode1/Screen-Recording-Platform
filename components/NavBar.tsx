@@ -35,7 +35,21 @@ const NavBar = () => {
                 className="rounded-full aspect-square"
               />
             </button>
-            <button className="cursor-pointer">
+            <button
+              className="cursor-pointer"
+              onClick={async () => {
+                try {
+                  // Call sign-out endpoint provided by better-auth
+                  await fetch("/api/auth/sign-out", { method: "POST" });
+                } catch (err) {
+                  // ignore errors - still redirect
+                  console.error("Sign out failed", err);
+                }
+                // Invalidate client session cache if available
+                authClient.invalidate?.();
+                router.push("/");
+              }}
+            >
               <Image
                 src="/assets/icons/logout.svg"
                 alt="log-out"

@@ -15,7 +15,7 @@ import { user, videos } from "@/drizzle/schema";
 import { revalidatePath } from "next/cache";
 import aj from "../arcjet";
 import { fixedWindow, request } from "@arcjet/next";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 
 const VIDEO_STREAM_BASE_URL = BUNNY.STREAM_BASE_URL;
 const THUMBNAIL_STORAGE_BASE_URL = BUNNY.STORAGE_BASE_URL;
@@ -122,54 +122,54 @@ export const saveVideoDetails = withErrorHandling(
   }
 );
 
-export const getAllVideos = withErrorHandling(
-  async (
-    searchQuery: string = "",
-    sortFilter?: string,
-    pageNumber: number = 1,
-    pageSize: number = 8
-  ) => {
-    const session = await auth.api.getSession({ headers: await headers() });
-    const currentUserId = session?.user.id;
+// export const getAllVideos = withErrorHandling(
+//   async (
+//     searchQuery: string = "",
+//     sortFilter?: string,
+//     pageNumber: number = 1,
+//     pageSize: number = 8
+//   ) => {
+//     const session = await auth.api.getSession({ headers: await headers() });
+//     const currentUserId = session?.user.id;
 
-    const canSeeTheVideos = or(
-      eq(videos.visibility, "public"),
-      eq(videos.userId, currentUserId!)
-    );
+//     const canSeeTheVideos = or(
+//       eq(videos.visibility, "public"),
+//       eq(videos.userId, currentUserId!)
+//     );
 
-    const whereCondition = searchQuery.trim()
-      ? and(canSeeTheVideos, doesTitleMatch(videos, searchQuery))
-      : canSeeTheVideos;
+//     const whereCondition = searchQuery.trim()
+//       ? and(canSeeTheVideos, doesTitleMatch(videos, searchQuery))
+//       : canSeeTheVideos;
 
-    const [{ totalCount }] = await db
-      .select({ totalCount: sql<number>`count(*)` })
-      .from(videos)
-      .where(whereCondition);
+//     const [{ totalCount }] = await db
+//       .select({ totalCount: sql<number>`count(*)` })
+//       .from(videos)
+//       .where(whereCondition);
 
-    const totalVideos = Number(totalCount || 0);
-    const totalPages = Math.ceil(totalVideos / pageSize);
+//     const totalVideos = Number(totalCount || 0);
+//     const totalPages = Math.ceil(totalVideos / pageSize);
 
-    const videoRecords = await buildVideoWithUserQuery()
-      .where(whereCondition)
-      .orderBy(
-        sortFilter
-          ? getOrderByClause(sortFilter)
-          : sql`${videos.createdAt} DESC`
-      )
-      .limit(pageSize)
-      .offset((pageNumber - 1) * pageSize);
+//     const videoRecords = await buildVideoWithUserQuery()
+//       .where(whereCondition)
+//       .orderBy(
+//         sortFilter
+//           ? getOrderByClause(sortFilter)
+//           : sql`${videos.createdAt} DESC`
+//       )
+//       .limit(pageSize)
+//       .offset((pageNumber - 1) * pageSize);
 
-    return {
-      videos: videoRecords,
-      pagination: {
-        currentPage: pageNumber,
-        totalPages,
-        totalVideos,
-        pageSize,
-      },
-    };
-  }
-);
+//     return {
+//       videos: videoRecords,
+//       pagination: {
+//         currentPage: pageNumber,
+//         totalPages,
+//         totalVideos,
+//         pageSize,
+//       },
+//     };
+//   }
+// );
 
 export const getVideoById = async (videoId: string) => {
   const rows = await db
@@ -199,3 +199,100 @@ export const getVideoById = async (videoId: string) => {
   // shape: { video: ..., user: ... }
   return videoRecord;
 };
+
+export const getAllVideos = withErrorHandling(
+  async (
+    searchQuery: string = "",
+    sortFilter?: string,
+    pageNumber: number = 1,
+    pageSize: number = 8
+  ) => {
+    const currentUserId = (
+      await auth.api.getSession({ headers: await headers() })
+    )?.user.id;
+
+    // Base visibility: public or owned by current user
+    const visibilityCondition = or(
+      eq(videos.visibility, "public"),
+      eq(videos.userId, currentUserId!)
+    );
+
+    // Optional search by normalized title
+    const whereCondition = searchQuery.trim()
+      ? and(
+          visibilityCondition,
+          ilike(
+            sql`REPLACE(REPLACE(REPLACE(LOWER(${videos.title}), '-', ''), '.', ''), ' ', '')`,
+            `%${searchQuery.replace(/[-. ]/g, "").toLowerCase()}%`
+          )
+        )
+      : visibilityCondition;
+
+    // Count total for pagination
+    const [{ totalCount }] = await db
+      .select({ totalCount: sql<number>`count(*)` })
+      .from(videos)
+      .where(whereCondition);
+    const totalVideos = Number(totalCount || 0);
+    const totalPages = Math.ceil(totalVideos / pageSize);
+
+    // Fetch paginated, sorted results
+    const videoRecords = await buildVideoWithUserQuery()
+      .where(whereCondition)
+      .orderBy(
+        sortFilter
+          ? getOrderByClause(sortFilter)
+          : sql`${videos.createdAt} DESC`
+      )
+      .limit(pageSize)
+      .offset((pageNumber - 1) * pageSize);
+
+    return {
+      videos: videoRecords,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        totalVideos,
+        pageSize,
+      },
+    };
+  }
+);
+
+export const getAllVideosByUser = withErrorHandling(
+  async (
+    userIdParameter: string,
+    searchQuery: string = "",
+    sortFilter?: string
+  ) => {
+    const currentUserId = (
+      await auth.api.getSession({ headers: await headers() })
+    )?.user.id;
+    const isOwner = userIdParameter === currentUserId;
+
+    const [userInfo] = await db
+      .select({
+        id: user.id,
+        name: user.name,
+        image: user.image,
+        email: user.email,
+      })
+      .from(user)
+      .where(eq(user.id, userIdParameter));
+    if (!userInfo) throw new Error("User not found");
+
+    const conditions = [
+      eq(videos.userId, userIdParameter),
+      ...(isOwner ? [] : [eq(videos.visibility, "public")]),
+      ...(searchQuery.trim() ? [ilike(videos.title, `%${searchQuery}%`)] : []),
+    ];
+
+    const userVideos = await buildVideoWithUserQuery()
+      .where(and(...conditions))
+      .orderBy(
+        sortFilter ? getOrderByClause(sortFilter) : desc(videos.createdAt)
+      );
+
+    return { user: userInfo, videos: userVideos, count: userVideos.length };
+  }
+);
