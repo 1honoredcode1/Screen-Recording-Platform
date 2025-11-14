@@ -170,3 +170,32 @@ export const getAllVideos = withErrorHandling(
     };
   }
 );
+
+export const getVideoById = async (videoId: string) => {
+  const rows = await db
+    .select({
+      video: videos,
+      user: user,
+    })
+    .from(videos)
+    .leftJoin(user, eq(videos.userId, user.id))
+    .where(eq(videos.videoId, videoId)); // or videos.id depending on your URL
+
+  const [videoRecord] = rows;
+
+  if (!videoRecord) {
+    // Try fallback: maybe the route used the DB uuid (videos.id) instead of the Bunny GUID (videos.videoId)
+    const fallbackRows = await db
+      .select({ video: videos, user: user })
+      .from(videos)
+      .leftJoin(user, eq(videos.userId, user.id))
+      .where(eq(videos.id, videoId));
+
+    const [fallbackRecord] = fallbackRows;
+    if (!fallbackRecord) return null;
+    return fallbackRecord;
+  }
+
+  // shape: { video: ..., user: ... }
+  return videoRecord;
+};
